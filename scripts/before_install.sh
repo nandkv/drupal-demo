@@ -1,21 +1,14 @@
 #!/bin/bash
 # Update system
-yum update -y
+dnf update -y
 
-# Install required repositories
-yum install -y epel-release
-yum install -y https://rpms.remirepo.net/enterprise/remi-release-7.rpm
-
-# Install yum-utils for repository management
-yum install -y yum-utils
-
-# Enable Remi PHP 8.3 repository
-yum-config-manager --enable remi-php83
-
-# Install PHP 8.3 and required extensions
-yum install -y php php-cli php-common php-mysqlnd php-zip php-gd php-mbstring php-xml php-json php-bcmath php-curl
+# Install PHP 8.1 and required extensions
+dnf install -y php-8.1 php-cli php-common php-mysqlnd php-zip \
+    php-gd php-mbstring php-xml php-json php-bcmath \
+    php-curl php-fpm httpd
 
 # Verify PHP version
+echo "Checking PHP version..."
 php -v
 
 # Install Composer
@@ -24,10 +17,23 @@ mv composer.phar /usr/local/bin/composer
 chmod +x /usr/local/bin/composer
 
 # Verify Composer version
+echo "Checking Composer version..."
 composer --version
 
-# Restart Apache
-systemctl restart httpd
+# Configure PHP-FPM
+systemctl start php-fpm
+systemctl enable php-fpm
+
+# Configure Apache to use PHP-FPM
+cat > /etc/httpd/conf.d/php-fpm.conf << 'EOF'
+<FilesMatch \.php$>
+    SetHandler "proxy:unix:/run/php-fpm/www.sock|fcgi://localhost"
+</FilesMatch>
+EOF
+
+# Start and enable Apache
+systemctl start httpd
+systemctl enable httpd
 
 # Debug information
 echo "PHP Version:"
@@ -36,3 +42,8 @@ echo "PHP Modules:"
 php -m
 echo "Composer Version:"
 composer --version
+echo "PHP-FPM Status:"
+systemctl status php-fpm
+echo "Apache Status:"
+systemctl status httpd
+
