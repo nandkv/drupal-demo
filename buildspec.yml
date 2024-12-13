@@ -5,8 +5,10 @@ phases:
       php: 8.1
     commands:
       - echo "Installing dependencies..."
+      - amazon-linux-extras enable php8.1
+      - yum clean metadata
+      - yum install -y php-cli php-common php-json php-process php-xml php-mysqlnd php-zip php-gd php-mbstring
       - php -v
-      - yum install -y php81 php81-cli php81-common php81-json php81-process php81-xml php81-mysqlnd php81-zip php81-gd php81-mbstring
       - curl -sS https://getcomposer.org/installer | php
       - mv composer.phar /usr/local/bin/composer
       - composer --version
