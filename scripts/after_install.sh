@@ -156,9 +156,23 @@ if [ -f "$APP_ROOT/vendor/bin/drush" ]; then
     ../vendor/bin/drush cache:rebuild
 fi
 
-# Restart services
+# Function to get correct PHP-FPM service name
+get_php_fpm_service() {
+    if systemctl list-units --type=service | grep -q "php-fpm"; then
+        echo "php-fpm"
+    elif systemctl list-units --type=service | grep -q "php82-php-fpm"; then
+        echo "php82-php-fpm"
+    else
+        log_message "ERROR: Could not determine PHP-FPM service name"
+        exit 1
+    fi
+}
+
+
+# Use the function when restarting services
+PHP_FPM_SERVICE=$(get_php_fpm_service)
 log_message "Restarting services..."
-systemctl restart php82-php-fpm
+systemctl restart $PHP_FPM_SERVICE
 systemctl restart httpd
 
 # Final status check
@@ -166,7 +180,7 @@ log_message "Checking service status:"
 echo "Apache status:"
 systemctl status httpd
 echo "PHP-FPM status:"
-systemctl status php82-php-fpm
+systemctl status $PHP_FPM_SERVICE
 
 # Verify Drupal status if drush is available
 if [ -f "$APP_ROOT/vendor/bin/drush" ]; then
