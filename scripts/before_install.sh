@@ -1,17 +1,10 @@
 #!/bin/bash
 
-# Exit on any error
+# Exit on error
 set -e
 
 # Update system
 dnf update -y --skip-broken
-
-# Enable Extra Packages for Enterprise Linux (EPEL)
-dnf install -y --skip-broken \
-    https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
-
-# Install Amazon Linux Extras
-dnf install -y amazon-linux-extras
 
 # Install base packages
 dnf install -y --skip-broken \
@@ -19,19 +12,9 @@ dnf install -y --skip-broken \
     httpd \
     git \
     unzip \
-    wget \
-    yum-utils
+    wget
 
-# Add PHP 8.2 repository for Amazon Linux 3
-cat > /etc/yum.repos.d/php.repo << 'EOF'
-[php82]
-name=PHP 8.2 for Amazon Linux 3
-baseurl=https://rpms.remirepo.net/enterprise/8/php82/x86_64/
-enabled=1
-gpgcheck=0
-EOF
-
-# Install PHP 8.2 and extensions
+# Install PHP and extensions directly from AL2023 repositories
 dnf install -y --skip-broken \
     php \
     php-cli \
@@ -48,6 +31,17 @@ dnf install -y --skip-broken \
     php-opcache \
     php-intl \
     php-pecl-apcu
+
+# Function to verify PHP installation
+verify_php_installation() {
+    if ! command -v php &> /dev/null; then
+        echo "ERROR: PHP installation failed"
+        exit 1
+    fi
+    
+    echo "PHP version installed:"
+    php -v
+}
 
 # Function to verify required PHP modules
 verify_php_modules() {
@@ -138,7 +132,8 @@ systemctl enable php-fpm || echo "Warning: Could not enable PHP-FPM"
 systemctl start httpd || echo "Warning: Could not start Apache"
 systemctl enable httpd || echo "Warning: Could not enable Apache"
 
-# Verify PHP modules
+# Verify PHP installation and modules
+verify_php_installation
 verify_php_modules
 
 # Debug information
@@ -165,6 +160,12 @@ fi
 
 if ! systemctl is-active --quiet httpd; then
     echo "WARNING: Apache is not running!"
+fi
+
+# Check installed PHP version meets requirements
+PHP_VERSION=$(php -r 'echo PHP_VERSION;')
+if ! echo "$PHP_VERSION" | grep -q "^8"; then
+    echo "WARNING: Installed PHP version ($PHP_VERSION) might not be compatible. Required: PHP 8.x"
 fi
 
 echo "Installation process completed with error handling enabled"
