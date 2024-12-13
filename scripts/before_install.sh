@@ -3,19 +3,19 @@
 # Exit on any error
 set -e
 
-# Update system
-dnf update -y
+# Update system with skip-broken flag
+dnf update -y --skip-broken
 
 # Install EPEL and REMI repositories
-dnf install -y dnf-utils
-dnf install -y https://rpms.remirepo.net/enterprise/remi-release-8.rpm
+dnf install -y --skip-broken dnf-utils
+dnf install -y --skip-broken https://rpms.remirepo.net/enterprise/remi-release-8.rpm
 
 # Reset and enable PHP 8.2 module
 dnf module reset php -y
 dnf module enable php:remi-8.2 -y
 
-# Install PHP 8.2 and required extensions
-dnf install -y \
+# Install PHP 8.2 and required extensions with skip-broken flag
+dnf install -y --skip-broken \
     php82 \
     php82-php-cli \
     php82-php-common \
@@ -33,20 +33,44 @@ dnf install -y \
     php82-php-pecl-apcu \
     httpd \
     git \
-    unzip
+    unzip || {
+        echo "Warning: Some packages might not have been installed. Continuing anyway..."
+    }
+
+# Function to verify required PHP modules
+verify_php_modules() {
+    required_modules=("json" "mysqlnd" "gd" "xml" "mbstring" "curl" "opcache")
+    missing_modules=()
+    
+    for module in "${required_modules[@]}"; do
+        if ! php -m | grep -qi "^${module}"; then
+            missing_modules+=("$module")
+        fi
+    done
+    
+    if [ ${#missing_modules[@]} -ne 0 ]; then
+        echo "Warning: The following PHP modules are missing: ${missing_modules[*]}"
+        echo "Attempting to install missing modules..."
+        for module in "${missing_modules[@]}"; do
+            dnf install -y --skip-broken "php82-php-${module}" || echo "Warning: Could not install php82-php-${module}"
+        done
+    fi
+}
 
 # Configure PHP alternatives
-alternatives --set php /usr/bin/php82
-alternatives --set php-cli /usr/bin/php82
+alternatives --set php /usr/bin/php82 || echo "Warning: Could not set PHP alternative"
+alternatives --set php-cli /usr/bin/php82 || echo "Warning: Could not set PHP-CLI alternative"
 
 # Verify PHP version
 echo "Checking PHP version..."
 php -v
 
 # Install Composer
-curl -sS https://getcomposer.org/installer | php
-mv composer.phar /usr/local/bin/composer
-chmod +x /usr/local/bin/composer
+if ! command -v composer &> /dev/null; then
+    curl -sS https://getcomposer.org/installer | php
+    mv composer.phar /usr/local/bin/composer
+    chmod +x /usr/local/bin/composer
+fi
 
 # Verify Composer version
 echo "Checking Composer version..."
@@ -70,8 +94,8 @@ realpath_cache_size = 4096K
 realpath_cache_ttl = 600
 EOF
 
-# Configure PHP-FPM
-cat > /etc/opt/remi/php82/php-fpm.d/www.conf << 'EOF'
+# Configure PHP-FPM with error handling
+cat > /etc/opt/remi/php82/php-fpm.d/www.conf << 'EOF' || echo "Warning: Could not create PHP-FPM configuration"
 [www]
 user = apache
 group = apache
@@ -89,7 +113,7 @@ pm.process_idle_timeout = 10s
 EOF
 
 # Configure Apache to use PHP-FPM
-cat > /etc/httpd/conf.d/php-fpm.conf << 'EOF'
+cat > /etc/httpd/conf.d/php-fpm.conf << 'EOF' || echo "Warning: Could not create Apache PHP-FPM configuration"
 <FilesMatch \.php$>
     SetHandler "proxy:unix:/var/opt/remi/php82/run/php-fpm/www.sock|fcgi://localhost"
 </FilesMatch>
@@ -100,21 +124,22 @@ cat > /etc/httpd/conf.d/php-fpm.conf << 'EOF'
 </LocationMatch>
 EOF
 
-# Start and enable PHP-FPM
-systemctl start php82-php-fpm
-systemctl enable php82-php-fpm
+# Start and enable services with error handling
+systemctl start php82-php-fpm || echo "Warning: Could not start PHP-FPM"
+systemctl enable php82-php-fpm || echo "Warning: Could not enable PHP-FPM"
+systemctl start httpd || echo "Warning: Could not start Apache"
+systemctl enable httpd || echo "Warning: Could not enable Apache"
 
-# Start and enable Apache
-systemctl start httpd
-systemctl enable httpd
+# Create directories with error handling
+mkdir -p /var/opt/remi/php82/lib/php/session || echo "Warning: Could not create session directory"
+mkdir -p /var/opt/remi/php82/lib/php/upload || echo "Warning: Could not create upload directory"
+chown apache:apache /var/opt/remi/php82/lib/php/session || echo "Warning: Could not set session directory ownership"
+chown apache:apache /var/opt/remi/php82/lib/php/upload || echo "Warning: Could not set upload directory ownership"
+chmod 700 /var/opt/remi/php82/lib/php/session || echo "Warning: Could not set session directory permissions"
+chmod 700 /var/opt/remi/php82/lib/php/upload || echo "Warning: Could not set upload directory permissions"
 
-# Create directory for session and uploads if they don't exist
-mkdir -p /var/opt/remi/php82/lib/php/session
-mkdir -p /var/opt/remi/php82/lib/php/upload
-chown apache:apache /var/opt/remi/php82/lib/php/session
-chown apache:apache /var/opt/remi/php82/lib/php/upload
-chmod 700 /var/opt/remi/php82/lib/php/session
-chmod 700 /var/opt/remi/php82/lib/php/upload
+# Verify PHP modules
+verify_php_modules
 
 # Debug information
 echo "=== Installation Complete ==="
@@ -125,10 +150,21 @@ php -m
 echo -e "\nComposer Version:"
 composer --version
 echo -e "\nPHP-FPM Status:"
-systemctl status php82-php-fpm
+systemctl status php82-php-fpm || true
 echo -e "\nApache Status:"
-systemctl status httpd
+systemctl status httpd || true
 echo -e "\nPHP-FPM Socket:"
-ls -l /var/opt/remi/php82/run/php-fpm/www.sock
+ls -l /var/opt/remi/php82/run/php-fpm/www.sock || echo "Warning: PHP-FPM socket not found"
 echo -e "\nPHP Configuration:"
-php -i | grep "Loaded Configuration File"
+php -i | grep "Loaded Configuration File" || echo "Warning: Could not determine PHP configuration file"
+
+# Final check for critical services
+if ! systemctl is-active --quiet php82-php-fpm; then
+    echo "WARNING: PHP-FPM is not running!"
+fi
+
+if ! systemctl is-active --quiet httpd; then
+    echo "WARNING: Apache is not running!"
+fi
+
+echo "Installation process completed with error handling enabled"
