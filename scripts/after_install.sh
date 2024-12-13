@@ -1,96 +1,178 @@
 #!/bin/bash
-# Create a temporary directory for unzipping
-TEMP_DIR=$(mktemp -d)
 
-# Unzip the application to the temp directory
-unzip -o /opt/codedeploy-agent/deployment-root/$DEPLOYMENT_GROUP_ID/$DEPLOYMENT_ID/deployment-archive/application.zip -d $TEMP_DIR
+# Exit on error
+set -e
+
+# Set variables
+TEMP_DIR=$(mktemp -d)
+DEPLOYMENT_ROOT="/opt/codedeploy-agent/deployment-root/$DEPLOYMENT_GROUP_ID/$DEPLOYMENT_ID/deployment-archive"
+WEB_ROOT="/var/www/html"
+APP_ROOT="/var/www"
+LOG_FILE="/var/log/drupal_deploy.log"
+
+# Function for logging
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
+}
+
+# Function to check directory structure
+check_directory_structure() {
+    local dir=$1
+    if [ ! -d "$dir/web" ]; then
+        log_message "ERROR: web directory not found in extracted files"
+        exit 1
+    fi
+    if [ ! -d "$dir/vendor" ]; then
+        log_message "ERROR: vendor directory not found in extracted files"
+        exit 1
+    fi
+    if [ ! -f "$dir/composer.json" ]; then
+        log_message "ERROR: composer.json not found in extracted files"
+        exit 1
+    fi
+}
+
+# Create log file
+touch $LOG_FILE
+chmod 644 $LOG_FILE
+
+log_message "Starting deployment process"
+
+# Verify deployment archive exists
+if [ ! -f "${DEPLOYMENT_ROOT}/application.zip" ]; then
+    log_message "ERROR: Deployment archive not found at ${DEPLOYMENT_ROOT}/application.zip"
+    exit 1
+fi
+
+# Unzip the application to temp directory
+log_message "Extracting application archive..."
+unzip -q -o "${DEPLOYMENT_ROOT}/application.zip" -d $TEMP_DIR
 
 # Debug: Show contents of temp directory
-echo "Contents of temp directory:"
+log_message "Extracted contents:"
 ls -la $TEMP_DIR
 
+# Verify directory structure
+check_directory_structure $TEMP_DIR
+
+# Backup current settings if they exist
+if [ -f "$WEB_ROOT/sites/default/settings.php" ]; then
+    log_message "Backing up existing settings.php..."
+    cp "$WEB_ROOT/sites/default/settings.php" "/tmp/settings.php.backup"
+fi
+
 # Clean the destination directories
-rm -rf /var/www/html/*
-rm -rf /var/www/composer.*
+log_message "Cleaning destination directories..."
+rm -rf $WEB_ROOT/*
+rm -rf $APP_ROOT/composer.*
+rm -rf $APP_ROOT/vendor
 
-# Move the web directory contents to /var/www/html
-mv $TEMP_DIR/web/* /var/www/html/
+# Move files to their correct locations
+log_message "Moving files to production locations..."
+mv $TEMP_DIR/web/* $WEB_ROOT/
+mv $TEMP_DIR/vendor $APP_ROOT/
+mv $TEMP_DIR/composer.json $APP_ROOT/
+mv $TEMP_DIR/composer.lock $APP_ROOT/ 2>/dev/null || true
 
-# Move the vendor directory to /var/www
-mv $TEMP_DIR/vendor /var/www/
-
-# Move composer files to /var/www
-mv $TEMP_DIR/composer.json /var/www/
-mv $TEMP_DIR/composer.lock /var/www/
+# Restore settings if backup exists
+if [ -f "/tmp/settings.php.backup" ]; then
+    log_message "Restoring settings.php..."
+    mkdir -p "$WEB_ROOT/sites/default"
+    mv "/tmp/settings.php.backup" "$WEB_ROOT/sites/default/settings.php"
+fi
 
 # Clean up temp directory
+log_message "Cleaning up temporary files..."
 rm -rf $TEMP_DIR
 
-# Set initial permissions
-chown -R apache:apache /var/www/html/
-chmod -R 755 /var/www/html/
-chown -R apache:apache /var/www/vendor/
-chmod -R 755 /var/www/vendor/
-chown apache:apache /var/www/composer.*
-chmod 644 /var/www/composer.*
+# Set correct ownership and permissions
+log_message "Setting file permissions..."
+chown -R apache:apache $WEB_ROOT
+chmod -R 755 $WEB_ROOT
+chown -R apache:apache $APP_ROOT/vendor
+chmod -R 755 $APP_ROOT/vendor
+chown apache:apache $APP_ROOT/composer.*
+chmod 644 $APP_ROOT/composer.*
 
-# Debug: Show PHP and environment information
+# Debug: Show environment information
+log_message "Environment Information:"
 echo "PHP Version:"
 php -v
 echo "Current directory structure:"
-ls -la /var/www/
+ls -la $APP_ROOT
 echo "Composer version:"
 composer --version
 
-# Install Drupal dependencies if using Composer
-cd /var/www  # Changed working directory to /var/www where composer.json is located
+# Install Drupal dependencies
+cd $APP_ROOT
 if [ -f "composer.json" ]; then
-    echo "composer.json found. Contents:"
-    cat composer.json
-    echo "Running composer install..."
-    COMPOSER_MEMORY_LIMIT=-1 composer install --no-dev --no-interaction
+    log_message "Installing Composer dependencies..."
+    COMPOSER_MEMORY_LIMIT=-1 composer install --no-dev --no-interaction --optimize-autoloader
 fi
 
+# Drupal specific setup
+log_message "Setting up Drupal directories and permissions..."
+
 # Create settings file if it doesn't exist
-if [ ! -f "/var/www/html/sites/default/settings.php" ]; then
-    echo "Creating settings.php..."
-    cp /var/www/html/sites/default/default.settings.php /var/www/html/sites/default/settings.php
+if [ ! -f "$WEB_ROOT/sites/default/settings.php" ]; then
+    log_message "Creating settings.php..."
+    cp $WEB_ROOT/sites/default/default.settings.php $WEB_ROOT/sites/default/settings.php
 fi
 
 # Set proper permissions for settings
-chmod 644 /var/www/html/sites/default/settings.php
-chown apache:apache /var/www/html/sites/default/settings.php
+chmod 644 $WEB_ROOT/sites/default/settings.php
+chown apache:apache $WEB_ROOT/sites/default/settings.php
 
-# Create files directory if it doesn't exist
-mkdir -p /var/www/html/sites/default/files
-chmod 775 /var/www/html/sites/default/files
-chown -R apache:apache /var/www/html/sites/default/files
+# Create and configure files directory
+mkdir -p $WEB_ROOT/sites/default/files
+chmod 775 $WEB_ROOT/sites/default/files
+chown -R apache:apache $WEB_ROOT/sites/default/files
+
+# Create and configure private files directory
+mkdir -p $WEB_ROOT/sites/default/private
+chmod 775 $WEB_ROOT/sites/default/private
+chown -R apache:apache $WEB_ROOT/sites/default/private
 
 # Set SELinux context if SELinux is enabled
 if command -v semanage >/dev/null 2>&1; then
-    echo "Setting SELinux context..."
-    semanage fcontext -a -t httpd_sys_content_t "/var/www/html(/.*)?"
-    semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/html/sites/default/files(/.*)?"
-    restorecon -Rv /var/www/html
+    log_message "Setting SELinux context..."
+    semanage fcontext -a -t httpd_sys_content_t "$WEB_ROOT(/.*)?"
+    semanage fcontext -a -t httpd_sys_rw_content_t "$WEB_ROOT/sites/default/files(/.*)?"
+    semanage fcontext -a -t httpd_sys_rw_content_t "$WEB_ROOT/sites/default/private(/.*)?"
+    restorecon -Rv $WEB_ROOT
 fi
 
-# Final permission check for files that need to be writable
-find /var/www/html -type f -exec chmod 644 {} \;
-find /var/www/html -type d -exec chmod 755 {} \;
+# Final permission adjustments
+log_message "Setting final permissions..."
+find $WEB_ROOT -type f -exec chmod 644 {} \;
+find $WEB_ROOT -type d -exec chmod 755 {} \;
+chmod 775 $WEB_ROOT/sites/default/files
+chmod 775 $WEB_ROOT/sites/default/private
 
-# Verify PHP-FPM is running
-echo "Checking PHP-FPM status:"
-systemctl status php-fpm
+# Clear caches
+if [ -f "$APP_ROOT/vendor/bin/drush" ]; then
+    log_message "Clearing Drupal caches..."
+    cd $WEB_ROOT
+    ../vendor/bin/drush cache:rebuild
+fi
 
-# Restart PHP-FPM and Apache
-echo "Restarting PHP-FPM and Apache..."
-systemctl restart php-fpm
+# Restart services
+log_message "Restarting services..."
+systemctl restart php82-php-fpm
 systemctl restart httpd
 
 # Final status check
+log_message "Checking service status:"
 echo "Apache status:"
 systemctl status httpd
 echo "PHP-FPM status:"
-systemctl status php-fpm
+systemctl status php82-php-fpm
 
-echo "Deployment completed successfully"
+# Verify Drupal status if drush is available
+if [ -f "$APP_ROOT/vendor/bin/drush" ]; then
+    log_message "Checking Drupal status:"
+    cd $WEB_ROOT
+    ../vendor/bin/drush status
+fi
+
+log_message "Deployment completed successfully"
