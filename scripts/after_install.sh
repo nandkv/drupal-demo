@@ -2,6 +2,9 @@
 # Create a temporary directory for unzipping
 TEMP_DIR=$(mktemp -d)
 
+# Force Composer to version 2.2 before doing anything else
+composer self-update --2.2
+
 # Unzip the application to the temp directory
 unzip -o /opt/codedeploy-agent/deployment-root/$DEPLOYMENT_GROUP_ID/$DEPLOYMENT_ID/deployment-archive/application.zip -d $TEMP_DIR
 
