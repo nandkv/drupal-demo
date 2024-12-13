@@ -23,6 +23,9 @@ chmod -R 755 /var/www/html/
 chown -R apache:apache /var/www/vendor/
 chmod -R 755 /var/www/vendor/
 
+# Verify PHP version before running composer
+php -v
+
 # Install Drupal dependencies if using Composer
 cd /var/www/html
 if [ -f "composer.json" ]; then
