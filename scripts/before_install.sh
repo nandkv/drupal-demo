@@ -2,19 +2,24 @@
 # Update system
 yum update -y
 
-# Install Amazon Linux Extras
-yum install -y amazon-linux-extras
+# Install required repositories
+yum install -y epel-release
+yum install -y https://rpms.remirepo.net/enterprise/remi-release-7.rpm
 
-# Enable and install PHP 8.1
-amazon-linux-extras enable php8.1
-yum clean metadata
-yum install -y php php-cli php-common php-mysqlnd php-zip php-gd php-mbstring php-xml php-json
+# Install yum-utils for repository management
+yum install -y yum-utils
+
+# Enable Remi PHP 8.3 repository
+yum-config-manager --enable remi-php83
+
+# Install PHP 8.3 and required extensions
+yum install -y php php-cli php-common php-mysqlnd php-zip php-gd php-mbstring php-xml php-json php-bcmath php-curl
 
 # Verify PHP version
 php -v
 
-# Install specific version of Composer (2.2 LTS)
-curl -sS https://getcomposer.org/installer | php -- --version=2.2.18
+# Install Composer
+curl -sS https://getcomposer.org/installer | php
 mv composer.phar /usr/local/bin/composer
 chmod +x /usr/local/bin/composer
 
@@ -23,3 +28,11 @@ composer --version
 
 # Restart Apache
 systemctl restart httpd
+
+# Debug information
+echo "PHP Version:"
+php -v
+echo "PHP Modules:"
+php -m
+echo "Composer Version:"
+composer --version
