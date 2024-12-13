@@ -28,6 +28,9 @@ hooks:
     - location: scripts/after_install.sh
       timeout: 300
       runas: root
+    - location: scripts/configure_apache.sh
+      timeout: 300
+      runas: root
   ApplicationStart:
     - location: scripts/start_application.sh
       timeout: 300
