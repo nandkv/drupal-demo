@@ -3,39 +3,51 @@
 # Exit on any error
 set -e
 
-# Update system with skip-broken flag
+# Update system
 dnf update -y --skip-broken
 
-# Install EPEL and REMI repositories
-dnf install -y --skip-broken dnf-utils
-dnf install -y --skip-broken https://rpms.remirepo.net/enterprise/remi-release-8.rpm
-
-# Reset and enable PHP 8.2 module
-dnf module reset php -y
-dnf module enable php:remi-8.2 -y
-
-# Install PHP 8.2 and required extensions with skip-broken flag
+# Enable Extra Packages for Enterprise Linux (EPEL)
 dnf install -y --skip-broken \
-    php82 \
-    php82-php-cli \
-    php82-php-common \
-    php82-php-mysqlnd \
-    php82-php-zip \
-    php82-php-gd \
-    php82-php-mbstring \
-    php82-php-xml \
-    php82-php-json \
-    php82-php-bcmath \
-    php82-php-curl \
-    php82-php-fpm \
-    php82-php-opcache \
-    php82-php-intl \
-    php82-php-pecl-apcu \
+    https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+
+# Install Amazon Linux Extras
+dnf install -y amazon-linux-extras
+
+# Install base packages
+dnf install -y --skip-broken \
+    dnf-utils \
     httpd \
     git \
-    unzip || {
-        echo "Warning: Some packages might not have been installed. Continuing anyway..."
-    }
+    unzip \
+    wget \
+    yum-utils
+
+# Add PHP 8.2 repository for Amazon Linux 3
+cat > /etc/yum.repos.d/php.repo << 'EOF'
+[php82]
+name=PHP 8.2 for Amazon Linux 3
+baseurl=https://rpms.remirepo.net/enterprise/8/php82/x86_64/
+enabled=1
+gpgcheck=0
+EOF
+
+# Install PHP 8.2 and extensions
+dnf install -y --skip-broken \
+    php \
+    php-cli \
+    php-common \
+    php-fpm \
+    php-mysqlnd \
+    php-zip \
+    php-gd \
+    php-mbstring \
+    php-xml \
+    php-json \
+    php-bcmath \
+    php-curl \
+    php-opcache \
+    php-intl \
+    php-pecl-apcu
 
 # Function to verify required PHP modules
 verify_php_modules() {
@@ -50,20 +62,8 @@ verify_php_modules() {
     
     if [ ${#missing_modules[@]} -ne 0 ]; then
         echo "Warning: The following PHP modules are missing: ${missing_modules[*]}"
-        echo "Attempting to install missing modules..."
-        for module in "${missing_modules[@]}"; do
-            dnf install -y --skip-broken "php82-php-${module}" || echo "Warning: Could not install php82-php-${module}"
-        done
     fi
 }
-
-# Configure PHP alternatives
-alternatives --set php /usr/bin/php82 || echo "Warning: Could not set PHP alternative"
-alternatives --set php-cli /usr/bin/php82 || echo "Warning: Could not set PHP-CLI alternative"
-
-# Verify PHP version
-echo "Checking PHP version..."
-php -v
 
 # Install Composer
 if ! command -v composer &> /dev/null; then
@@ -72,13 +72,9 @@ if ! command -v composer &> /dev/null; then
     chmod +x /usr/local/bin/composer
 fi
 
-# Verify Composer version
-echo "Checking Composer version..."
-composer --version
-
 # Configure PHP
-cp /etc/opt/remi/php82/php.ini /etc/opt/remi/php82/php.ini.bak
-cat > /etc/opt/remi/php82/php.d/99-custom.ini << 'EOF'
+cp /etc/php.ini /etc/php.ini.bak
+cat > /etc/php.d/99-custom.ini << 'EOF'
 memory_limit = 256M
 max_execution_time = 120
 post_max_size = 64M
@@ -94,12 +90,12 @@ realpath_cache_size = 4096K
 realpath_cache_ttl = 600
 EOF
 
-# Configure PHP-FPM with error handling
-cat > /etc/opt/remi/php82/php-fpm.d/www.conf << 'EOF' || echo "Warning: Could not create PHP-FPM configuration"
+# Configure PHP-FPM
+cat > /etc/php-fpm.d/www.conf << 'EOF'
 [www]
 user = apache
 group = apache
-listen = /var/opt/remi/php82/run/php-fpm/www.sock
+listen = /run/php-fpm/www.sock
 listen.owner = apache
 listen.group = apache
 listen.mode = 0660
@@ -113,9 +109,9 @@ pm.process_idle_timeout = 10s
 EOF
 
 # Configure Apache to use PHP-FPM
-cat > /etc/httpd/conf.d/php-fpm.conf << 'EOF' || echo "Warning: Could not create Apache PHP-FPM configuration"
+cat > /etc/httpd/conf.d/php-fpm.conf << 'EOF'
 <FilesMatch \.php$>
-    SetHandler "proxy:unix:/var/opt/remi/php82/run/php-fpm/www.sock|fcgi://localhost"
+    SetHandler "proxy:unix:/run/php-fpm/www.sock|fcgi://localhost"
 </FilesMatch>
 
 # PHP-FPM status and ping paths
@@ -124,19 +120,23 @@ cat > /etc/httpd/conf.d/php-fpm.conf << 'EOF' || echo "Warning: Could not create
 </LocationMatch>
 EOF
 
-# Start and enable services with error handling
-systemctl start php82-php-fpm || echo "Warning: Could not start PHP-FPM"
-systemctl enable php82-php-fpm || echo "Warning: Could not enable PHP-FPM"
+# Create necessary directories
+mkdir -p /run/php-fpm
+chown apache:apache /run/php-fpm
+
+# Create session and upload directories
+mkdir -p /var/lib/php/session
+mkdir -p /var/lib/php/upload
+chown apache:apache /var/lib/php/session
+chown apache:apache /var/lib/php/upload
+chmod 700 /var/lib/php/session
+chmod 700 /var/lib/php/upload
+
+# Start and enable services
+systemctl start php-fpm || echo "Warning: Could not start PHP-FPM"
+systemctl enable php-fpm || echo "Warning: Could not enable PHP-FPM"
 systemctl start httpd || echo "Warning: Could not start Apache"
 systemctl enable httpd || echo "Warning: Could not enable Apache"
-
-# Create directories with error handling
-mkdir -p /var/opt/remi/php82/lib/php/session || echo "Warning: Could not create session directory"
-mkdir -p /var/opt/remi/php82/lib/php/upload || echo "Warning: Could not create upload directory"
-chown apache:apache /var/opt/remi/php82/lib/php/session || echo "Warning: Could not set session directory ownership"
-chown apache:apache /var/opt/remi/php82/lib/php/upload || echo "Warning: Could not set upload directory ownership"
-chmod 700 /var/opt/remi/php82/lib/php/session || echo "Warning: Could not set session directory permissions"
-chmod 700 /var/opt/remi/php82/lib/php/upload || echo "Warning: Could not set upload directory permissions"
 
 # Verify PHP modules
 verify_php_modules
@@ -150,16 +150,16 @@ php -m
 echo -e "\nComposer Version:"
 composer --version
 echo -e "\nPHP-FPM Status:"
-systemctl status php82-php-fpm || true
+systemctl status php-fpm || true
 echo -e "\nApache Status:"
 systemctl status httpd || true
 echo -e "\nPHP-FPM Socket:"
-ls -l /var/opt/remi/php82/run/php-fpm/www.sock || echo "Warning: PHP-FPM socket not found"
+ls -l /run/php-fpm/www.sock || echo "Warning: PHP-FPM socket not found"
 echo -e "\nPHP Configuration:"
 php -i | grep "Loaded Configuration File" || echo "Warning: Could not determine PHP configuration file"
 
 # Final check for critical services
-if ! systemctl is-active --quiet php82-php-fpm; then
+if ! systemctl is-active --quiet php-fpm; then
     echo "WARNING: PHP-FPM is not running!"
 fi
 
