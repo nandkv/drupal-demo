@@ -15,6 +15,7 @@
         }
     ],
     "require": {
+        "php": ">=8.2",  // Drupal 11 requires PHP 8.2+
         "composer/installers": "^2.0",
         "drupal/core-composer-scaffold": "^11.0",
         "drupal/core-project-message": "^11.0",
