@@ -11,6 +11,8 @@ phases:
       - php composer.phar install
   build:
     commands:
+      - echo "Making scripts executable..."
+      - chmod +x scripts/*.sh
       - echo "Packaging application..."
       - zip -r application.zip .
 artifacts:
@@ -18,3 +20,4 @@ artifacts:
     - application.zip
     - appspec.yml
     - scripts/*
+  discard-paths: no
