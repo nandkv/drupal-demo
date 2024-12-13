@@ -2,20 +2,22 @@
 # Create a temporary directory for unzipping
 TEMP_DIR=$(mktemp -d)
 
-# Force Composer to version 2.2 before doing anything else
-composer self-update --2.2
-
 # Unzip the application to the temp directory
 unzip -o /opt/codedeploy-agent/deployment-root/$DEPLOYMENT_GROUP_ID/$DEPLOYMENT_ID/deployment-archive/application.zip -d $TEMP_DIR
 
-# Clean the destination directory
+# Clean the destination directories
 rm -rf /var/www/html/*
+rm -rf /var/www/composer.*
 
 # Move the web directory contents to /var/www/html
 mv $TEMP_DIR/web/* /var/www/html/
 
-# Move the vendor directory to the correct location (one level up from web)
+# Move the vendor directory to /var/www
 mv $TEMP_DIR/vendor /var/www/
+
+# Move composer files to /var/www
+mv $TEMP_DIR/composer.json /var/www/
+mv $TEMP_DIR/composer.lock /var/www/
 
 # Clean up temp directory
 rm -rf $TEMP_DIR
@@ -25,14 +27,18 @@ chown -R apache:apache /var/www/html/
 chmod -R 755 /var/www/html/
 chown -R apache:apache /var/www/vendor/
 chmod -R 755 /var/www/vendor/
+chown apache:apache /var/www/composer.*
+chmod 644 /var/www/composer.*
 
 # Verify PHP version before running composer
+echo "PHP Version:"
 php -v
 
 # Install Drupal dependencies if using Composer
-cd /var/www/html
+cd /var/www  # Changed working directory to /var/www where composer.json is located
 if [ -f "composer.json" ]; then
-    composer install --no-dev
+    echo "Running composer install..."
+    COMPOSER_MEMORY_LIMIT=-1 composer install --no-dev
 fi
 
 # Create settings file if it doesn't exist
