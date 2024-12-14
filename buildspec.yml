@@ -2,11 +2,11 @@ version: 0.2
 phases:
   install:
     runtime-versions:
-      php: 8.1
+      php: 8.2
     commands:
       - echo "Installing dependencies..."
       - apt-get update
-      - apt-get install -y php8.1 php8.1-cli php8.1-common php8.1-mysql php8.1-zip php8.1-gd php8.1-mbstring php8.1-curl php8.1-xml php8.1-bcmath
+      - apt-get install -y php8.2 php8.2-cli php8.2-common php8.2-mysql php8.2-zip php8.2-gd php8.2-mbstring php8.2-curl php8.2-xml php8.2-bcmath php8.2-opcache
       - php -v
       - curl -sS https://getcomposer.org/installer | php
       - mv composer.phar /usr/local/bin/composer
@@ -14,7 +14,7 @@ phases:
   pre_build:
     commands:
       - echo "Installing project dependencies..."
-      - composer install --no-dev --no-interaction --prefer-dist
+      - composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
   build:
     commands:
       - echo "Making scripts executable..."
@@ -27,3 +27,4 @@ artifacts:
     - appspec.yml
     - scripts/*
   discard-paths: no
+
